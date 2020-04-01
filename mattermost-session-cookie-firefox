@@ -1,0 +1,59 @@
+#! /bin/sh
+
+set -e #Bail out if anything goes wrong
+
+usage() {
+    echo "Usage: $0 HOST [PROFILE]" >&2
+    exit 1
+}
+
+# We require either 1 or 2 arguments
+if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
+    usage
+fi
+# ... and the first argument is the host for which we retrieve the cookie
+webclient_host=$1
+
+firefox_dir="$HOME/.mozilla/firefox/"
+
+# Either use provided profile or use first in config file
+if [ "$#" -ne 2 ]; then
+    profiles_file="$firefox_dir/profiles.ini"
+    profile_name=$(sed -n '/Path=/s/Path=//p' $profiles_file | head -n1)
+else
+    profile_name=$2
+fi
+
+# Create tmp file for cookie db copy, but make sure to delete it at the end
+db_copy=$(mktemp)
+cleanup() {
+    rm -f $db_copy
+}
+trap cleanup EXIT
+
+# Locate cookie db file for given profile
+profile_path="$firefox_dir/$profile_name"
+db_path="$profile_path/cookies.sqlite"
+
+#Copy database and make it read-only as well as only readable by the current user
+cp $db_path $db_copy
+chmod 400 $db_copy
+
+# Read cookie value using sqlite3
+cookie_cmd="SELECT value FROM moz_cookies WHERE (host = '$webclient_host' OR host = '.$webclient_host') AND name = 'MMAUTHTOKEN';"
+cookie_value=$(sqlite3 $db_copy "$cookie_cmd" ".exit")
+
+# Check if we got any cookie at all
+if [ -z $cookie_value ]; then
+    echo "No cookie present!" >&2
+    exit 2
+fi
+
+# Check if the cookie is (still) valid by running a simple API-request
+status_code=$(curl -s -o /dev/null -w "%{http_code}" -L -H "Authorization: Bearer ${cookie_value}" "https://${webclient_host}/api/v4/users/me")
+if [ $status_code != "200" ]; then
+    echo "Cookie invalid or expired!" >&2
+    exit 3
+fi
+
+echo $cookie_value
