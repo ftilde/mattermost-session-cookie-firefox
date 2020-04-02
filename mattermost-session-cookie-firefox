@@ -2,10 +2,76 @@
 
 set -e #Bail out if anything goes wrong
 
+#############################################
+# Support functions                         #
+#############################################
+
+binary_name=$(basename $0)
 usage() {
-    echo "Usage: $0 HOST [PROFILE]" >&2
+    echo "Usage: ${binary_name} HOST [PROFILE]" >&2
     exit 1
 }
+
+# Setup tmp files and make sure to delete them at the end.
+db_copy=$(mktemp)
+login_redirect_page=$(mktemp --suffix=".html")
+cleanup() {
+    rm -f $db_copy
+    rm -f $login_redirect_page
+}
+trap cleanup EXIT
+
+# Web page that will be opened and shown to the user if a valid session cookie cannot be retrieved
+open_login_redirect_page() {
+    echo "
+    <body>
+    <h2>${binary_name}</h2>
+    <br>
+    Unable to retrieve a valid session cookie from the specified firefox profile.
+    <br>
+    Please login via the <a href="https://zivmattermost.uni-muenster.de">webclient</a>.
+    </body>
+    " > $login_redirect_page
+    firefox $login_redirect_page > /dev/null 2>&1
+}
+
+# Read cookie value using sqlite3
+cookie_value=""
+run_cookie_query() {
+    #Copy database and make it read-only as well as only readable by the current user
+    chmod 600 $db_copy
+    cp $db_path $db_copy
+    chmod 400 $db_copy
+    # Read cookie value using sqlite3
+    cookie_cmd="SELECT value FROM moz_cookies WHERE (host = '$webclient_host' OR host = '.$webclient_host') AND name = 'MMAUTHTOKEN';"
+    cookie_value=$(sqlite3 $db_copy "$cookie_cmd" ".exit")
+}
+
+# Check if the cookie is (still) valid by running a simple API-request
+check_cookie_valid() {
+    if [ -z $cookie_value ] ; then
+        return 1
+    fi
+    status_code=$(curl -s -o /dev/null -w "%{http_code}" -L -H "Authorization: Bearer ${cookie_value}" "https://${webclient_host}/api/v4/users/me")
+    if [ $status_code == "200" ] ; then
+        return 0
+    else
+        return 2
+    fi
+}
+
+#############################################
+# Some constants                            #
+#############################################
+
+# Location of firefox'es profile files etc.
+firefox_dir="$HOME/.mozilla/firefox/"
+# Wait this many seconds between trying to read the session cookie while the user logs into the web client
+webclient_login_poll_duration=5 #seconds
+
+#############################################
+# Main functionality                        #
+#############################################
 
 # We require either 1 or 2 arguments
 if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
@@ -13,8 +79,6 @@ if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
 fi
 # ... and the first argument is the host for which we retrieve the cookie
 webclient_host=$1
-
-firefox_dir="$HOME/.mozilla/firefox/"
 
 # Either use provided profile or use first in config file
 if [ "$#" -ne 2 ]; then
@@ -24,36 +88,33 @@ else
     profile_name=$2
 fi
 
-# Create tmp file for cookie db copy, but make sure to delete it at the end
-db_copy=$(mktemp)
-cleanup() {
-    rm -f $db_copy
-}
-trap cleanup EXIT
-
 # Locate cookie db file for given profile
 profile_path="$firefox_dir/$profile_name"
 db_path="$profile_path/cookies.sqlite"
 
-#Copy database and make it read-only as well as only readable by the current user
-cp $db_path $db_copy
-chmod 400 $db_copy
-
-# Read cookie value using sqlite3
-cookie_cmd="SELECT value FROM moz_cookies WHERE (host = '$webclient_host' OR host = '.$webclient_host') AND name = 'MMAUTHTOKEN';"
-cookie_value=$(sqlite3 $db_copy "$cookie_cmd" ".exit")
+# Try to fetch the cookie once initially
+run_cookie_query
 
 # Check if we got any cookie at all
-if [ -z $cookie_value ]; then
-    echo "No cookie present!" >&2
-    exit 2
+if check_cookie_valid ; then
+    echo $cookie_value
+    exit 0
 fi
 
-# Check if the cookie is (still) valid by running a simple API-request
-status_code=$(curl -s -o /dev/null -w "%{http_code}" -L -H "Authorization: Bearer ${cookie_value}" "https://${webclient_host}/api/v4/users/me")
-if [ $status_code != "200" ]; then
-    echo "Cookie invalid or expired!" >&2
-    exit 3
-fi
+# As we do not have an initial valid session cookie, prompt the user to login
+# via the web client and ...
+open_login_redirect_page
 
-echo $cookie_value
+# ... Check the session cookie every 5 seconds to see if the user has finally logged in.
+while true; do
+    echo "Session cookie invalid. Please login via the web client." >&2
+
+    sleep $webclient_login_poll_duration
+    run_cookie_query
+
+    # Check if the cookie is (still) valid by running a simple API-request
+    if check_cookie_valid; then
+        echo $cookie_value
+        exit 0
+    fi
+done
