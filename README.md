@@ -15,7 +15,7 @@ instances that do not allow username/password or personal access token login.
 ## Usage
 ```
 $ mattermost-session-cookie-firefox
-Usage: mattermost-session-cookie-firefox HOST [PROFILE]
+Usage: mattermost-session-cookie-firefox WEBCLIENT_URL [PROFILE]
 ```
 
 To use the script with firefox, add this script to your `$PATH` and something
@@ -27,9 +27,9 @@ tokencmd: mattermost-session-cookie-firefox my.mattermost.host.com my-firefox-pr
 ## How it works
 First, the cookie file for the provided or otherwise the first found firefox
 profile is located. Then, it is tried to extract the value of the `MMAUTHTOKEN`
-cookie for the desired host and if that succeeds, a test api call to the
-specified host is made. If the cookie is present and the api call succeeds, the
-cookie value is printed to stdout. Otherwise, a webpage is opened in the
+cookie for the desired webclient host and if that succeeds, a test api call to
+the specified host is made. If the cookie is present and the api call succeeds,
+the cookie value is printed to stdout. Otherwise, a webpage is opened in the
 browser (firefox) which asks the user to log in using the webclient of the
 mattermost instance. In the meantime, the above cookie retrieval and check
 procedure is repeated until it succeeds.

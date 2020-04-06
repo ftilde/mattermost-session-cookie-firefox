@@ -8,7 +8,7 @@ set -e #Bail out if anything goes wrong
 
 binary_name=$(basename $0)
 usage() {
-    echo "Usage: ${binary_name} HOST [PROFILE]" >&2
+    echo "Usage: ${binary_name} WEBCLIENT_URL [PROFILE]" >&2
     exit 1
 }
 
@@ -29,7 +29,7 @@ open_login_redirect_page() {
     <br>
     Unable to retrieve a valid session cookie from the specified firefox profile.
     <br>
-    Please login via the <a href="https://zivmattermost.uni-muenster.de">webclient</a>.
+    Please login via the <a href="${webclient_url}">webclient</a>.
     </body>
     " > $login_redirect_page
     firefox $login_redirect_page > /dev/null 2>&1
@@ -43,7 +43,8 @@ run_cookie_query() {
     cp $db_path $db_copy
     chmod 400 $db_copy
     # Read cookie value using sqlite3
-    cookie_cmd="SELECT value FROM moz_cookies WHERE (host = '$webclient_host' OR host = '.$webclient_host') AND name = 'MMAUTHTOKEN';"
+    cookie_cmd="SELECT value FROM moz_cookies WHERE (host = '$webclient_host' OR host = '.$webclient_host')\
+        AND path = '$webclient_path/' AND name = 'MMAUTHTOKEN';"
     cookie_value=$(sqlite3 $db_copy "$cookie_cmd" ".exit")
 }
 
@@ -52,7 +53,8 @@ check_cookie_valid() {
     if [ -z $cookie_value ] ; then
         return 1
     fi
-    status_code=$(curl -s -o /dev/null -w "%{http_code}" -L -H "Authorization: Bearer ${cookie_value}" "https://${webclient_host}/api/v4/users/me")
+    status_code=$(curl -s -o /dev/null -w "%{http_code}" -L \
+        -H "Authorization: Bearer ${cookie_value}" "${webclient_url}/api/v4/users/me")
     if [ $status_code == "200" ] ; then
         return 0
     else
@@ -77,8 +79,25 @@ webclient_login_poll_duration=5 #seconds
 if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
     usage
 fi
-# ... and the first argument is the host for which we retrieve the cookie
-webclient_host=$1
+# ... and the first argument is the url for which we retrieve the cookie
+webclient_url=$1
+
+# Parse the provided URL
+webclient_protocol=$(echo $webclient_url | sed -n 's#^\(.*\)://.*$#\1#p')
+if [ $webclient_protocol ]; then
+    webclient_url_without_protocol=$(echo $webclient_url | sed -n 's#^.*://\(.*\)$#\1#p')
+else
+    webclient_url_without_protocol=$webclient_url
+    webclient_protocol="https"
+fi
+webclient_path=$(echo $webclient_url_without_protocol | sed -n 's#^.*\(/.*\)/?$#\1#p')
+webclient_host=$(echo $webclient_url_without_protocol | sed -n 's#^\(.*\)/.*$#\1#p')
+if [ -z $webclient_host ]; then
+    webclient_host=$webclient_url_without_protocol
+fi
+
+# After parsing, reconstruct a "proper" url
+webclient_url="${webclient_protocol}://${webclient_host}${webclient_path}"
 
 # Either use provided profile or use first in config file
 if [ "$#" -ne 2 ]; then
