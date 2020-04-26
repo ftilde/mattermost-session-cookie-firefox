@@ -6,7 +6,7 @@ set -e #Bail out if anything goes wrong
 # Support functions                         #
 #############################################
 
-binary_name=$(basename $0)
+binary_name=$(basename "$0")
 usage() {
     echo "Usage: ${binary_name} WEBCLIENT_URL [PROFILE]" >&2
     exit 1
@@ -16,8 +16,8 @@ usage() {
 db_copy=$(mktemp)
 login_redirect_page=$(mktemp --suffix=".html")
 cleanup() {
-    rm -f $db_copy
-    rm -f $login_redirect_page
+    rm -f "$db_copy"
+    rm -f "$login_redirect_page"
 }
 trap cleanup EXIT
 
@@ -29,33 +29,33 @@ open_login_redirect_page() {
     <br>
     Unable to retrieve a valid session cookie from the specified firefox profile.
     <br>
-    Please login via the <a href="${webclient_url}">webclient</a>.
+    Please login via the <a href=\"${webclient_url}\">webclient</a>.
     </body>
-    " > $login_redirect_page
-    firefox $login_redirect_page > /dev/null 2>&1
+    " > "$login_redirect_page"
+    firefox "$login_redirect_page" > /dev/null 2>&1
 }
 
 # Read cookie value using sqlite3
 cookie_value=""
 run_cookie_query() {
     #Copy database and make it read-only as well as only readable by the current user
-    chmod 600 $db_copy
-    cp $db_path $db_copy
-    chmod 400 $db_copy
+    chmod 600 "$db_copy"
+    cp "$db_path" "$db_copy"
+    chmod 400 "$db_copy"
     # Read cookie value using sqlite3
     cookie_cmd="SELECT value FROM moz_cookies WHERE (host = '$webclient_host' OR host = '.$webclient_host')\
         AND path = '$webclient_path/' AND name = 'MMAUTHTOKEN';"
-    cookie_value=$(sqlite3 $db_copy "$cookie_cmd" ".exit")
+    cookie_value=$(sqlite3 "$db_copy" "$cookie_cmd" ".exit")
 }
 
 # Check if the cookie is (still) valid by running a simple API-request
 check_cookie_valid() {
-    if [ -z $cookie_value ] ; then
+    if [ -z "$cookie_value" ] ; then
         return 1
     fi
     status_code=$(curl -s -o /dev/null -w "%{http_code}" -L \
         -H "Authorization: Bearer ${cookie_value}" "${webclient_url}/api/v4/users/me")
-    if [ $status_code == "200" ] ; then
+    if [ "$status_code" = "200" ] ; then
         return 0
     else
         return 2
@@ -83,16 +83,16 @@ fi
 webclient_url=$1
 
 # Parse the provided URL
-webclient_protocol=$(echo $webclient_url | sed -n 's#^\(.*\)://.*$#\1#p')
-if [ $webclient_protocol ]; then
-    webclient_url_without_protocol=$(echo $webclient_url | sed -n 's#^.*://\(.*\)$#\1#p')
+webclient_protocol=$(echo "$webclient_url" | sed -n 's#^\(.*\)://.*$#\1#p')
+if [ "$webclient_protocol" ]; then
+    webclient_url_without_protocol=$(echo "$webclient_url" | sed -n 's#^.*://\(.*\)$#\1#p')
 else
     webclient_url_without_protocol=$webclient_url
     webclient_protocol="https"
 fi
-webclient_path=$(echo $webclient_url_without_protocol | sed -n 's#^.*\(/.*\)/?$#\1#p')
-webclient_host=$(echo $webclient_url_without_protocol | sed -n 's#^\(.*\)/.*$#\1#p')
-if [ -z $webclient_host ]; then
+webclient_path=$(echo "$webclient_url_without_protocol" | sed -n 's#^.*\(/.*\)/?$#\1#p')
+webclient_host=$(echo "$webclient_url_without_protocol" | sed -n 's#^\(.*\)/.*$#\1#p')
+if [ -z "$webclient_host" ]; then
     webclient_host=$webclient_url_without_protocol
 fi
 
@@ -102,7 +102,7 @@ webclient_url="${webclient_protocol}://${webclient_host}${webclient_path}"
 # Either use provided profile or use first in config file
 if [ "$#" -ne 2 ]; then
     profiles_file="$firefox_dir/profiles.ini"
-    profile_name=$(sed -n '/Path=/s/Path=//p' $profiles_file | head -n1)
+    profile_name=$(sed -n '/Path=/s/Path=//p' "$profiles_file" | head -n1)
 else
     profile_name=$2
 fi
@@ -116,7 +116,7 @@ run_cookie_query
 
 # Check if we got any cookie at all
 if check_cookie_valid ; then
-    echo $cookie_value
+    echo "$cookie_value"
     exit 0
 fi
 
@@ -133,7 +133,7 @@ while true; do
 
     # Check if the cookie is (still) valid by running a simple API-request
     if check_cookie_valid; then
-        echo $cookie_value
+        echo "$cookie_value"
         exit 0
     fi
 done
