@@ -99,10 +99,10 @@ fi
 # After parsing, reconstruct a "proper" url
 webclient_url="${webclient_protocol}://${webclient_host}${webclient_path}"
 
-# Either use provided profile or use first in config file
+# Either use provided profile or the default one
 if [ "$#" -ne 2 ]; then
     profiles_file="$firefox_dir/profiles.ini"
-    profile_name=$(sed -n '/Path=/s/Path=//p' "$profiles_file" | head -n1)
+    profile_name=$(sed -n '/Default=/s/Default=//p' "$profiles_file" | head -n1)
 else
     profile_name=$2
 fi
